@@ -40,6 +40,7 @@ interface Bullet {
   id: number
   x: number
   y: number
+  speedX: number // added horizontal speed for angled shots
   speedY: number
 }
 
@@ -50,16 +51,11 @@ export default function BirdAttackGame() {
   const [particles, setParticles] = useState<Particle[]>([])
   const [bullets, setBullets] = useState<Bullet[]>([])
   const [gunShooting, setGunShooting] = useState(false)
-  const [clouds, setClouds] = useState<Cloud[]>([
-    { id: 1, x: 15, y: 8, size: 120, opacity: 0.7, speed: 0.1 },
-    { id: 2, x: 65, y: 12, size: 150, opacity: 0.6, speed: 0.15 },
-    { id: 3, x: 35, y: 20, size: 100, opacity: 0.8, speed: 0.08 },
-    { id: 4, x: 80, y: 25, size: 180, opacity: 0.5, speed: 0.12 },
-    { id: 5, x: 10, y: 40, size: 90, opacity: 0.7, speed: 0.09 },
-    { id: 6, x: 55, y: 45, size: 140, opacity: 0.6, speed: 0.11 },
-  ])
+  const [gunAngle, setGunAngle] = useState(0) // added gun rotation angle state
+  const [clouds, setClouds] = useState<Cloud[]>([])
   const gameAreaRef = useRef<HTMLDivElement>(null)
   const animationRef = useRef<number>()
+  const [audioContext, setAudioContext] = useState<AudioContext | null>(null)
 
   const BirdSprite = ({ bird }: { bird: Bird }) => {
     const colors = {
@@ -79,7 +75,7 @@ export default function BirdAttackGame() {
           top: `${bird.y}%`,
           width: `${bird.size}px`,
           height: `${bird.size}px`,
-          transform: `rotate(${bird.speedX > 0 ? 0 : 180}deg)`,
+          transform: `scaleX(${bird.speedX > 0 ? 1 : -1})`,
         }}
       >
         <svg width="100%" height="100%" viewBox="0 0 60 40" className="drop-shadow-md">
@@ -110,7 +106,10 @@ export default function BirdAttackGame() {
 
   const MachineGun = () => (
     <div className="absolute bottom-16 left-1/2 transform -translate-x-1/2 pointer-events-none">
-      <div className={`transition-transform duration-100 ${gunShooting ? "scale-110" : "scale-100"}`}>
+      <div
+        className={`transition-transform duration-100 ${gunShooting ? "scale-110" : "scale-100"}`}
+        style={{ transform: `rotate(${gunAngle}deg)` }} // added rotation based on gunAngle
+      >
         <svg width="80" height="60" viewBox="0 0 80 60" className="drop-shadow-lg">
           {/* Gun base */}
           <rect x="30" y="45" width="20" height="15" fill="#4A4A4A" rx="2" />
@@ -197,25 +196,61 @@ export default function BirdAttackGame() {
     setParticles((prev) => [...prev, ...newParticles])
   }
 
-  const shootBullet = useCallback((clientX: number, clientY: number) => {
-    if (!gameAreaRef.current) return
-
-    const rect = gameAreaRef.current.getBoundingClientRect()
-    const x = ((clientX - rect.left) / rect.width) * 100
-
-    const newBullet: Bullet = {
-      id: Date.now() + Math.random(),
-      x: 50, // Start from gun position (center)
-      y: 85, // Start from gun position (bottom)
-      speedY: -3, // Move upward
+  const initAudio = useCallback(() => {
+    if (!audioContext) {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
+      setAudioContext(ctx)
     }
+  }, [audioContext])
 
-    setBullets((prev) => [...prev, newBullet])
+  const playShootSound = useCallback(() => {
+    if (!audioContext) return
 
-    // Gun shooting animation
-    setGunShooting(true)
-    setTimeout(() => setGunShooting(false), 100)
-  }, [])
+    const oscillator = audioContext.createOscillator()
+    const gainNode = audioContext.createGain()
+
+    oscillator.connect(gainNode)
+    gainNode.connect(audioContext.destination)
+
+    oscillator.frequency.setValueAtTime(800, audioContext.currentTime)
+    oscillator.frequency.exponentialRampToValueAtTime(200, audioContext.currentTime + 0.1)
+
+    gainNode.gain.setValueAtTime(0.1, audioContext.currentTime)
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1)
+
+    oscillator.start(audioContext.currentTime)
+    oscillator.stop(audioContext.currentTime + 0.1)
+  }, [audioContext])
+
+  const shootBullet = useCallback(
+    (clientX: number, clientY: number) => {
+      if (!gameAreaRef.current) return
+
+      initAudio()
+
+      const angleRad = (gunAngle * Math.PI) / 180
+      const speed = 3
+      const speedX = Math.sin(angleRad) * speed
+      const speedY = -Math.cos(angleRad) * speed
+
+      const newBullet: Bullet = {
+        id: Date.now() + Math.random(),
+        x: 50, // Start from gun position (center)
+        y: 85, // Start from gun position (bottom)
+        speedX, // horizontal speed based on angle
+        speedY, // vertical speed based on angle
+      }
+
+      setBullets((prev) => [...prev, newBullet])
+
+      // Gun shooting animation
+      setGunShooting(true)
+      setTimeout(() => setGunShooting(false), 100)
+
+      playShootSound()
+    },
+    [initAudio, playShootSound, gunAngle], // added gunAngle dependency
+  )
 
   const checkCollisions = useCallback(() => {
     setBullets((prevBullets) => {
@@ -282,6 +317,18 @@ export default function BirdAttackGame() {
     setBirds((prev) => [...prev, newBird])
   }, [])
 
+  const spawnCloud = useCallback(() => {
+    const newCloud: Cloud = {
+      id: Date.now() + Math.random(),
+      x: Math.random() * 100,
+      y: Math.random() * 50 + 15,
+      size: Math.floor(Math.random() * 50) + 50,
+      opacity: Math.random() * 0.5 + 0.5,
+      speed: Math.random() * 0.5 + 0.5,
+    }
+    setClouds((prev) => [...prev, newCloud])
+  }, [])
+
   const updateGame = useCallback(() => {
     // Update birds
     setBirds((prev) =>
@@ -300,9 +347,10 @@ export default function BirdAttackGame() {
         prev
           .map((bullet) => ({
             ...bullet,
+            x: bullet.x + bullet.speedX, // update horizontal position
             y: bullet.y + bullet.speedY,
           }))
-          .filter((bullet) => bullet.y > -5), // Remove bullets that go off screen
+          .filter((bullet) => bullet.y > -5 && bullet.x > -5 && bullet.x < 105), // filter bullets that go off screen horizontally too
     )
 
     // Update clouds
@@ -340,6 +388,10 @@ export default function BirdAttackGame() {
         spawnBird()
       }
 
+      if (Math.random() < 0.01) {
+        spawnCloud()
+      }
+
       animationRef.current = requestAnimationFrame(gameLoop)
     }
 
@@ -353,7 +405,29 @@ export default function BirdAttackGame() {
         cancelAnimationFrame(animationRef.current)
       }
     }
-  }, [gameStarted, updateGame, spawnBird])
+  }, [gameStarted, updateGame, spawnBird, spawnCloud])
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!gameStarted) return
+
+      switch (e.key) {
+        case "ArrowLeft":
+        case "a":
+        case "A":
+          setGunAngle((prev) => Math.max(prev - 5, -45)) // Rotate left, max -45 degrees
+          break
+        case "ArrowRight":
+        case "d":
+        case "D":
+          setGunAngle((prev) => Math.min(prev + 5, 45)) // Rotate right, max 45 degrees
+          break
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [gameStarted])
 
   const startGame = () => {
     setGameStarted(true)
@@ -361,6 +435,7 @@ export default function BirdAttackGame() {
     setBirds([])
     setParticles([])
     setBullets([])
+    setClouds([])
   }
 
   const resetGame = () => {
@@ -369,6 +444,7 @@ export default function BirdAttackGame() {
     setBirds([])
     setParticles([])
     setBullets([])
+    setClouds([])
   }
 
   const handleGameAreaClick = (e: React.MouseEvent) => {
@@ -423,6 +499,7 @@ export default function BirdAttackGame() {
             <p className="text-gray-600 mb-2">🔫 Стреляйте из пулемета по птицам!</p>
             <p className="text-gray-600 mb-2">🔴 Красные птицы = больше очков</p>
             <p className="text-gray-600 mb-6">⚡ Кликайте, чтобы стрелять пулями</p>
+            <p className="text-gray-600 mb-6">← → или A/D для поворота пулемета</p> {/* added rotation instructions */}
             <Button
               onClick={startGame}
               className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white px-8 py-4 text-lg font-bold rounded-xl shadow-lg transform hover:scale-105 transition-all duration-200"
@@ -511,8 +588,11 @@ export default function BirdAttackGame() {
 
       <MachineGun />
 
-      <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-white/90 backdrop-blur-sm rounded-xl px-6 py-3 text-center shadow-lg border border-white/20">
-        <div className="text-sm font-semibold text-gray-700">🔫 Кликайте по экрану, чтобы стрелять из пулемета!</div>
+      {/* Instructions */}
+      <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white/90 backdrop-blur-sm rounded-lg p-4 text-center shadow-lg max-w-sm">
+        <p className="text-gray-700 mb-2">{"Кликайте по экрану, чтобы стрелять!"}</p>
+        <p className="text-sm text-gray-600">{"Используйте ← → или A/D для поворота пулемета"}</p>{" "}
+        {/* added rotation instructions */}
       </div>
     </div>
   )
