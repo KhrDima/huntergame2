@@ -408,6 +408,43 @@ export default function BirdAttackGame() {
   }, [gameStarted, updateGame, spawnBird, spawnCloud])
 
   useEffect(() => {
+    if (!gameStarted) return
+
+    let touchStartX = 0
+    let touchStartY = 0
+    let isTouchRotating = false
+
+    const handleTouchStart = (e: TouchEvent) => {
+      const touch = e.touches[0]
+      touchStartX = touch.clientX
+      touchStartY = touch.clientY
+
+      // Check if touch is in bottom area where gun is located
+      const screenHeight = window.innerHeight
+      if (touch.clientY > screenHeight * 0.7) {
+        isTouchRotating = true
+      }
+    }
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (!isTouchRotating) return
+
+      const touch = e.touches[0]
+      const deltaX = touch.clientX - touchStartX
+
+      // Rotate gun based on horizontal swipe
+      if (Math.abs(deltaX) > 10) {
+        const rotationSpeed = 0.3
+        const newAngle = Math.max(-45, Math.min(45, gunAngle + deltaX * rotationSpeed))
+        setGunAngle(newAngle)
+        touchStartX = touch.clientX
+      }
+    }
+
+    const handleTouchEnd = () => {
+      isTouchRotating = false
+    }
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!gameStarted) return
 
@@ -415,19 +452,28 @@ export default function BirdAttackGame() {
         case "ArrowLeft":
         case "a":
         case "A":
-          setGunAngle((prev) => Math.max(prev - 5, -45)) // Rotate left, max -45 degrees
+          setGunAngle((prev) => Math.max(prev - 5, -45))
           break
         case "ArrowRight":
         case "d":
         case "D":
-          setGunAngle((prev) => Math.min(prev + 5, 45)) // Rotate right, max 45 degrees
+          setGunAngle((prev) => Math.min(prev + 5, 45))
           break
       }
     }
 
     window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [gameStarted])
+    window.addEventListener("touchstart", handleTouchStart, { passive: false })
+    window.addEventListener("touchmove", handleTouchMove, { passive: false })
+    window.addEventListener("touchend", handleTouchEnd)
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown)
+      window.removeEventListener("touchstart", handleTouchStart)
+      window.removeEventListener("touchmove", handleTouchMove)
+      window.removeEventListener("touchend", handleTouchEnd)
+    }
+  }, [gameStarted, gunAngle])
 
   const startGame = () => {
     setGameStarted(true)
@@ -589,11 +635,12 @@ export default function BirdAttackGame() {
       <MachineGun />
 
       {/* Instructions */}
-      <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white/90 backdrop-blur-sm rounded-lg p-4 text-center shadow-lg max-w-sm">
-        <p className="text-gray-700 mb-2">{"Кликайте по экрану, чтобы стрелять!"}</p>
-        <p className="text-sm text-gray-600">{"Используйте ← → или A/D для поворота пулемета"}</p>{" "}
-        {/* added rotation instructions */}
-      </div>
+      {gameStarted && (
+        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-white/90 backdrop-blur-sm rounded-lg p-3 text-center shadow-lg max-w-sm mx-4">
+          <p className="text-gray-700 text-sm mb-1">{"Кликайте по экрану, чтобы стрелять!"}</p>
+          <p className="text-xs text-gray-600">{"← → или A/D для поворота • Свайп внизу экрана на мобильном"}</p>
+        </div>
+      )}
     </div>
   )
 }
